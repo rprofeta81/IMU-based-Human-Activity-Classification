@@ -1,119 +1,148 @@
 #include "board_setup.h"
 
-#define DO_FOREVER          while(1)
-#define POLLING_DELAY_MS    2500  // Poll every 2.5 seconds
+#include <tensorflow/lite/micro/all_ops_resolver.h>
+#include <tensorflow/lite/micro/micro_error_reporter.h>
+#include <tensorflow/lite/micro/micro_interpreter.h>
+#include <tensorflow/lite/micro/system_setup.h>
+#include <tensorflow/lite/schema/schema_generated.h>
 
-// Adjust tensor arena size if your new model is larger than the old sine-wave model
-#define TENSOR_ARENA_SIZE   8 * 1024 
-
-// Adjust these to match your model's exact expected dimensions
-#define IMU_INPUT_ELEMENTS  6     //  Accel X, Y, Z + Gyro X, Y, Z
-#define NUM_CLASSES         4     // For example: 0=Rest, 1=Walk, 2=Run, 3=Stairs
-
-// Standard TensorFlow Lite Micro headers (Uncomment if needed)
-#include "tensorflow/lite/micro/micro_log.h"
-#include "tensorflow/lite/micro/system_setup.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-
-// Your custom activity model header
+// Include the generated TFLite model header
 #include "enhanced_activity_model.h"
 
-// Helper function to find the index with the highest probability
-int get_argmax(float* array, int size) {
-    int max_idx = 0;
-    float max_val = array[0];
-    for (int i = 1; i < size; i++) {
-        if (array[i] > max_val) {
-            max_val = array[i];
-            max_idx = i;
-        }
-    }
-    return max_idx;
+// Define activity labels (must match the order used during training)
+const char* activity_labels_cpp[] = {
+    "Walking Upstairs",
+    "Walking Downstairs",
+    "Walking",
+    "Sitting",
+    "Standing",
+    "Jogging"
+};
+
+// Global TFLite objects
+tflite::MicroErrorReporter tflite_error_reporter;
+const tflite::Model* model = nullptr;
+tflite::MicroInterpreter* interpreter = nullptr;
+tflite::MicroMutableOpResolver<10>* op_resolver = nullptr; // Increased resolver size
+TfLiteTensor* input_tensor = nullptr;
+TfLiteTensor* output_tensor = nullptr;
+
+// Create an arena for the model's tensors
+// The size might need to be adjusted based on your model's complexity
+const int kTensorArenaSize = 25 * 1024; // 25 KB, adjust if needed
+uint8_t g_tensor_arena[kTensorArenaSize];
+
+// Scaling parameters (mean and standard deviation) from StandardScaler
+// These values must be obtained from your Python training script
+const float g_mean[] = { -6.82813589e+02,  -1.78204618e+02,   2.56997457e+03,  -1.07725916e+02,   7.65345719e+01,   1.58359491e+02 };
+const float g_std[] = {  7.76562095e+03,   1.50346383e+04,   8.00684693e+03,   4.59600100e+03,   6.16012759e+03,   7.01777218e+03 };
+
+// Placeholder for IMU data acquisition. Replace with your sensor code.
+// This function should read raw IMU data (ax, ay, az, gx, gy, gz)
+// and populate the input_data array.
+void read_imu_data(float* input_data) {
+    // For demonstration, we'll use a fixed set of values. 
+    // In a real application, you would read from your IMU sensor here.
+    // Example raw data (replace with actual sensor readings)
+    input_data[0] = -1248; // ax
+    input_data[1] = 14736; // ay
+    input_data[2] = -6780; // az
+    input_data[3] = 1057;  // gx
+    input_data[4] = 1422;  // gy
+    input_data[5] = 2038;  // gz
+
+    // You could also simulate different activities for testing:
+    // static int counter = 0;
+    // if (counter % 2 == 0) { // Simulate walking upstairs
+    //     input_data[0] = -1000; input_data[1] = 15000; input_data[2] = -7000;
+    //     input_data[3] = 1000; input_data[4] = 1500; input_data[5] = 2000;
+    // } else { // Simulate sitting
+    //     input_data[0] = 500; input_data[1] = 100; input_data[2] = 9500;
+    //     input_data[3] = 50; input_data[4] = 10; input_data[5] = 20;
+    // }
+    // counter++;
 }
 
-// Map the argmax index to a human-readable string
-const char* get_activity_name(int class_index) {
-    switch(class_index) {
-        case 0: return "Resting";
-        case 1: return "Walking";
-        case 2: return "Running";
-        default: return "Unknown Activity";
-    }
-}
+void setup() {
+    tflite::InitializeTarget();
+    Serial.begin(115200); // Initialize serial communication
+    while (!Serial); // Wait for serial port to connect. Needed for native USB
 
-int main(void) {
-    HAL_Init();
-    init_GPIO_pins();
-    init_UART2();
-    init_TIM2();
-    // init_IMU(); // Ensure you initialize your specific IMU driver here (SPI/I2C)
+    Serial.println("Initializing TFLite Micro...");
 
-    const tflite::Model* model = tflite::GetModel(enhanced_activity_model);
+    // Map the model into a usable data structure
+    model = tflite::GetModel(enhanced_activity_model_data);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
-        UART_printf("Model version mismatch! Expected %d, got %d\n", TFLITE_SCHEMA_VERSION, model->version());
-        return -1;
-    }
-    
-    // Note: If your model uses operations other than FullyConnected and Relu (like Conv1D),
-    // you will need to add those operators here or use AllOpsResolver.
-    tflite::MicroMutableOpResolver<3> resolver;
-    if (resolver.AddFullyConnected() != kTfLiteOk || 
-        resolver.AddRelu() != kTfLiteOk ||
-        resolver.AddSoftmax() != kTfLiteOk) { // Softmax is common for final classification layers
-        UART_printf("Failed to add all the ops.\n");
-        return -1;
+        TF_LITE_REPORT_ERROR(&tflite_error_reporter, "Model schema version mismatch! Expected %d, got %d.",
+                             TFLITE_SCHEMA_VERSION, model->version());
+        return;
     }
 
-    // Keep aligned to 16 bytes for CMSIS-NN/ARM optimization
-    alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
+    // Pull in the all ops. You can optimize this by only including the ops you need.
+    op_resolver = new tflite::MicroMutableOpResolver<10>();
+    op_resolver->AddDense();
+    op_resolver->AddFullyConnected(); // Dense is often aliased to FullyConnected
+    op_resolver->AddSoftmax();
+    // Add any other ops your model uses
 
-    tflite::MicroInterpreter static_interpreter(model, resolver, tensor_arena, TENSOR_ARENA_SIZE);
-    tflite::MicroInterpreter* interpreter = &static_interpreter;
-    if (interpreter->AllocateTensors() != kTfLiteOk) {
-        UART_printf("Failed to allocate tensors.\n");
-        return -1;
+    // Build an interpreter to run the model
+    interpreter = new tflite::MicroInterpreter(
+        model, *op_resolver, g_tensor_arena, kTensorArenaSize, &tflite_error_reporter);
+
+    // Allocate tensors from the memory arena
+    TfLiteStatus allocate_status = interpreter->AllocateTensors();
+    if (allocate_status != kTfLiteOk) {
+        TF_LITE_REPORT_ERROR(&tflite_error_reporter, "AllocateTensors() failed!");
+        return;
     }
 
-    TfLiteTensor* input = interpreter->input(0);
-    TfLiteTensor* output = interpreter->output(0);
+    // Get pointers to the input and output tensors
+    input_tensor = interpreter->input(0);
+    output_tensor = interpreter->output(0);
 
-    UART_printf("IMU Activity Classifier Initialized Successfully!\n");
+    Serial.println("TFLite Micro initialized successfully!");
+}
 
-    DO_FOREVER {
-        uint32_t start_ms = HAL_GetTick();
+void loop() {
+    // Delay for 2-3 seconds
+    delay(2500); // 2500 milliseconds = 2.5 seconds
 
-        // 1. Read your physical IMU data into variables here
-        float ax = 0.0f, ay = 0.0f, az = 0.0f; 
-        // Example: IMU_Read_Accel(&ax, &ay, &az);
+    Serial.println("\nReading IMU data...");
+    float raw_imu_data[6];
+    read_imu_data(raw_imu_data);
 
-        // 2. Load the IMU data into the model input tensor
-        // (Modify this indexing depending on if your model expects a time-series buffer)
-        input->data.f[0] = ax;
-        input->data.f[1] = ay;
-        input->data.f[2] = az;
-        // Fill the rest up to IMU_INPUT_ELEMENTS...
+    // Scale the input data using the pre-calculated mean and std dev
+    for (int i = 0; i < 6; ++i) {
+        input_tensor->data.f[i] = (raw_imu_data[i] - g_mean[i]) / g_std[i];
+    }
 
-        // 3. Run Inference
-        if (interpreter->Invoke() != kTfLiteOk) {
-            UART_printf("Inference Failed!\n");
-            HAL_Delay(POLLING_DELAY_MS);
-            continue;
+    // Run inference
+    TfLiteStatus invoke_status = interpreter->Invoke();
+    if (invoke_status != kTfLiteOk) {
+        TF_LITE_REPORT_ERROR(&tflite_error_reporter, "Invoke failed!");
+        return;
+    }
+
+    // Get the output scores (probabilities)
+    float* output_scores = output_tensor->data.f;
+
+    // Find the activity with the highest score
+    float max_score = -1.0;
+    int predicted_activity_index = -1;
+    for (int i = 0; i < 6; ++i) {
+        if (output_scores[i] > max_score) {
+            max_score = output_scores[i];
+            predicted_activity_index = i;
         }
+    }
 
-        // 4. Process Classification Results
-        int predicted_class = get_argmax(output->data.f, NUM_CLASSES);
-        float confidence = output->data.f[predicted_class];
-        uint32_t execution_time = HAL_GetTick() - start_ms;
-
-        // 5. Print Results over Serial
-        UART_printf("Predicted: %s (Confidence: %d%%) [Took %ums]\n", 
-                    get_activity_name(predicted_class), 
-                    (int)(confidence * 100), 
-                    execution_time);
-
-        // 6. Wait 2.5 seconds before polling again
-        HAL_Delay(POLLING_DELAY_MS);
+    Serial.print("Predicted Activity: ");
+    if (predicted_activity_index != -1) {
+        Serial.print(activity_labels_cpp[predicted_activity_index]);
+        Serial.print(" (Score: ");
+        Serial.print(max_score, 4); // Print score with 4 decimal places
+        Serial.println(")");
+    } else {
+        Serial.println("Could not determine activity.");
     }
 }
