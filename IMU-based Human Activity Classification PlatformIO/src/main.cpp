@@ -7,7 +7,7 @@
 #define TENSOR_ARENA_SIZE   8 * 1024 
 
 // Adjust these to match your model's exact expected dimensions
-#define IMU_INPUT_ELEMENTS  6     // For example: Accel X, Y, Z + Gyro X, Y, Z
+#define IMU_INPUT_ELEMENTS  6     //  Accel X, Y, Z + Gyro X, Y, Z
 #define NUM_CLASSES         4     // For example: 0=Rest, 1=Walk, 2=Run, 3=Stairs
 
 // Standard TensorFlow Lite Micro headers (Uncomment if needed)
