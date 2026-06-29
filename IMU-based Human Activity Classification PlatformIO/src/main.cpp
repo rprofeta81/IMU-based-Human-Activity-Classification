@@ -34,8 +34,8 @@ uint8_t g_tensor_arena[kTensorArenaSize];
 
 // Scaling parameters (mean and standard deviation) from StandardScaler
 // These values must be obtained from your Python training script
-const float g_mean[] = { -6.82813589e+02,  -1.78204618e+02,   2.56997457e+03,  -1.07725916e+02,   7.65345719e+01,   1.58359491e+02 };
-const float g_std[] = {  7.76562095e+03,   1.50346383e+04,   8.00684693e+03,   4.59600100e+03,   6.16012759e+03,   7.01777218e+03 };
+const float g_mean[] = {1906.18630431, 5231.88101198, -4316.21812981, 10.75862685, -274.85723225, -202.32853567};
+const float g_std[] = {6616.99734886, 12900.50103468, 5838.89261839, 4586.6168787, 6332.61625367, 6228.89244874};
 
 // Placeholder for IMU data acquisition. Replace with your sensor code.
 // This function should read raw IMU data (ax, ay, az, gx, gy, gz)
