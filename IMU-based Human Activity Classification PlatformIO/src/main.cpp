@@ -1,10 +1,11 @@
 #include "board_setup.h"
 
-#include <tensorflow/lite/micro/all_ops_resolver.h>
-#include <tensorflow/lite/micro/micro_error_reporter.h>
-#include <tensorflow/lite/micro/micro_interpreter.h>
-#include <tensorflow/lite/micro/system_setup.h>
-#include <tensorflow/lite/schema/schema_generated.h>
+// Core TensorFlow Lite Micro Headers
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/system_setup.h"
+#include "tensorflow/lite/micro/micro_log.h"       // Replaces micro_error_reporter.h
+#include "tensorflow/lite/micro/schema_generated.h" // Updated clean path
 
 // Include the generated TFLite model header
 #include "enhanced_activity_model.h"
