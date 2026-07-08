@@ -1,5 +1,5 @@
 #include "board_setup.h"
-#include "enhanced_activity_model.h"
+#include "BMI270.h"
 
 // TensorFlow Lite Micro Headers
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
@@ -7,6 +7,8 @@
 #include "tensorflow/lite/micro/system_setup.h"
 #include "tensorflow/lite/micro/micro_log.h"       
 #include "tensorflow/lite/schema/schema_generated.h" 
+
+#include "enhanced_activity_model.h"
 
 // defining activity labels 
 const char* activity_labels_cpp[] = {
@@ -33,14 +35,67 @@ alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // Aligned to 16 bytes for
 const float g_mean[] = {1906.18630431, 5231.88101198, -4316.21812981, 10.75862685, -274.85723225, -202.32853567};
 const float g_std[] = {6616.99734886, 12900.50103468, 5838.89261839, 4586.6168787, 6332.61625367, 6228.89244874};
 
+
+//Error handler function for I2C initialization failures
+void Error_Handler() {
+    UART_printf("I2C Initialization Error! Check connections and configurations.\r\n");
+    while (1) {
+        // Stay here to indicate error
+    }
+}
+
+
+// Declare I2C Handle globally
+I2C_HandleTypeDef hi2c1; 
+// Instantiate BMI270 class globally, passing the address of the I2C handle
+BMI270 bmi270_sensor(&hi2c1);
+// Function to initialize I2C for BMI270
+void init_I2C_BMI270() {
+    hi2c1.Instance = I2C1; // Use I2C1 peripheral
+    hi2c1.Init.Timing = 0x00702991; // Example timing for 100kHz, adjust for your clock and desired speed
+    hi2c1.Init.OwnAddress1 = 0; // Master mode, so no own address needed
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
+        // Error handling if I2C initialization fails
+        Error_Handler(); // You should define an Error_Handler function
+    }
+    // Enable the Analog Noise Filter
+    if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK) {
+        Error_Handler();
+    }
+    // Enable the Digital Noise Filter (optional, depends on your needs)
+    if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK) {
+        Error_Handler();
+    }
+    UART_printf("I2C1 Initialized.\r\n");
+}
+
+
+// Placeholder for IMU data acquisition. Will now read from BMI270.
 void read_imu_data(float* input_data) {
-    // Populate raw data vector mapping components: [ax, ay, az, gx, gy, gz]
-    input_data[0] = -1248; // ax
-    input_data[1] = 14736; // ay
-    input_data[2] = -6780; // az
-    input_data[3] = 1057;  // gx
-    input_data[4] = 1422;  // gy
-    input_data[5] = 2038;  // gz
+    bmi270_sensor_data_t sensor_data;
+    if (bmi270_sensor.readSensorData(&sensor_data) == 0) {
+        input_data[0] = sensor_data.acc_x; // ax
+        input_data[1] = sensor_data.acc_y; // ay
+        input_data[2] = sensor_data.acc_z; // az
+        input_data[3] = sensor_data.gyr_x;  // gx
+        input_data[4] = sensor_data.gyr_y;  // gy
+        input_data[5] = sensor_data.gyr_z;  // gz
+    } else {
+        UART_printf("Error reading BMI270 data! Using dummy data.\r\n");
+        // Fallback to dummy data or error handling
+        input_data[0] = 0.0f;
+        input_data[1] = 0.0f;
+        input_data[2] = 0.0f;
+        input_data[3] = 0.0f;
+        input_data[4] = 0.0f;
+        input_data[5] = 0.0f;
+    }
 }
 
 void setup() {
@@ -50,6 +105,7 @@ void setup() {
     init_GPIO_pins();
     init_UART2();
     init_TIM2();
+    init_I2C_BMI270(); 
     UART_printf("Initializing TFLite Micro...\r\n");
     // Checks if the model's schema version matches the TFLite Micro library's expected version.
     model = tflite::GetModel(enhanced_activity_model);
@@ -79,6 +135,11 @@ void setup() {
     output_tensor = interpreter->output(0);
 
     UART_printf("TFLite Micro initialized successfully!\r\n");
+
+    // Initialize the BMI270 sensor
+    if (bmi270_sensor.init() != 0) {
+        UART_printf("Failed to initialize BMI270 sensor!\r\n");
+    }
 }
 
 

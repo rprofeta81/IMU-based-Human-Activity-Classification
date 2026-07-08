@@ -1,4 +1,3 @@
-```cpp
 // BMI270.cpp
 #include "BMI270.h"
 #include "tensorflow/lite/micro/micro_log.h" // For MicroPrintf
@@ -151,4 +150,3 @@ int8_t BMI270::readSensorData(bmi270_sensor_data_t* data) {
     if (readGyroscope(&data->gyr_x, &data->gyr_y, &data->gyr_z) != 0) return -1;
     return 0;
 }
-```
