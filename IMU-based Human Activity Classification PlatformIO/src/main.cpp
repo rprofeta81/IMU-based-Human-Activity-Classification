@@ -1,15 +1,15 @@
 #include "board_setup.h"
 
-// Core TensorFlow Lite Micro Headers (Using modern local inclusions)
+// TensorFlow Lite Micro Headers
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/system_setup.h"
-#include "tensorflow/lite/micro/micro_log.h"       // Modern replacement for micro_error_reporter.h
-#include "tensorflow/lite/schema/schema_generated.h" // Desktop-aligned verified subpath
+#include "tensorflow/lite/micro/micro_log.h"       
+#include "tensorflow/lite/schema/schema_generated.h" 
 
 #include "enhanced_activity_model.h"
 
-// Define activity labels (must match the order used during training)
+// defining activity labels 
 const char* activity_labels_cpp[] = {
     "Walking Upstairs",
     "Walking Downstairs",
@@ -19,10 +19,10 @@ const char* activity_labels_cpp[] = {
     "Jogging"
 };
 
-// Global TFLite objects (Statically allocated to prevent heap allocation/fragmentation)
+// Global TFLite objects
 const tflite::Model* model = nullptr;
 tflite::MicroInterpreter* interpreter = nullptr;
-tflite::MicroMutableOpResolver<6> op_resolver; // Size optimized to exactly what your model needs
+tflite::MicroMutableOpResolver<6> op_resolver; 
 TfLiteTensor* input_tensor = nullptr;
 TfLiteTensor* output_tensor = nullptr;
 
@@ -30,7 +30,7 @@ TfLiteTensor* output_tensor = nullptr;
 const int kTensorArenaSize = 25 * 1024; // 25 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // Aligned to 16 bytes for hardware vector speedup
 
-// Scaling parameters (mean and standard deviation) from StandardScaler
+// Scaling parameters (mean and standard deviation) calculated from Google Colab file
 const float g_mean[] = {1906.18630431, 5231.88101198, -4316.21812981, 10.75862685, -274.85723225, -202.32853567};
 const float g_std[] = {6616.99734886, 12900.50103468, 5838.89261839, 4586.6168787, 6332.61625367, 6228.89244874};
 
@@ -48,16 +48,15 @@ void read_imu_data(float* input_data) {
 void setup() {
     tflite::InitializeTarget();
     
-    // UART terminal communication initializer setup 
-    // Note: Serial interface functions are standard Arduino framework mappings. 
-    // In plain stm32cube workloads, replace with your custom UART_printf routine if needed.
-    Serial.begin(115200); 
-    while (!Serial); 
+    // Initialize bare-metal hardware peripherals defined in your board_setup files
+    init_GPIO_pins();
+    init_UART2();
+    init_TIM2();
 
-    MicroPrintf("Initializing TFLite Micro...");
+    UART_printf("Initializing TFLite Micro...\r\n");
 
-    // Map the model into a usable data structure
-    model = tflite::GetModel(enhanced_activity_model_data);
+    // Map the model into a usable data structure using your verified array name
+    model = tflite::GetModel(enhanced_activity_model);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         MicroPrintf("Model schema version mismatch! Expected %d, got %d.",
                     TFLITE_SCHEMA_VERSION, model->version());
@@ -85,13 +84,16 @@ void setup() {
     input_tensor = interpreter->input(0);
     output_tensor = interpreter->output(0);
 
-    MicroPrintf("TFLite Micro initialized successfully!");
+    UART_printf("TFLite Micro initialized successfully!\r\n");
 }
 
-void loop() {
-    delay(2500); // 2.5 seconds loop interval
 
-    MicroPrintf("\nReading IMU data...");
+
+void loop() {
+    // STM32 hardware SysTick Delay
+    HAL_Delay(2500); 
+
+    UART_printf("\r\nReading IMU data...\r\n");
     float raw_imu_data[6];
     read_imu_data(raw_imu_data);
 
@@ -120,14 +122,25 @@ void loop() {
         }
     }
 
-    // Broadcast results out to physical serial interface
-    Serial.print("Predicted Activity: ");
+    // Broadcast results out to physical serial interface using native layout
     if (predicted_activity_index != -1) {
-        Serial.print(activity_labels_cpp[predicted_activity_index]);
-        Serial.print(" (Score: ");
-        Serial.print(max_score, 4); 
-        Serial.println(")");
+        UART_printf("Predicted Activity: %s (Score: %d.%04d)\r\n", 
+                    activity_labels_cpp[predicted_activity_index],
+                    (int)max_score, 
+                    (int)((max_score - (int)max_score) * 10000));
     } else {
-        Serial.println("Could not determine activity.");
+        UART_printf("Could not determine activity.\r\n");
+    }
+}
+
+
+
+int main(void) {
+    // Reset of all peripherals, Initializes the Flash interface and the Systick.
+    HAL_Init();
+    
+    setup();
+    while (1) {
+        loop();
     }
 }
