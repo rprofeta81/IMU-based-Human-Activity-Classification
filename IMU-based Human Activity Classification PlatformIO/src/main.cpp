@@ -25,12 +25,10 @@ tflite::MicroInterpreter* interpreter = nullptr;
 tflite::MicroMutableOpResolver<6> op_resolver; 
 TfLiteTensor* input_tensor = nullptr;
 TfLiteTensor* output_tensor = nullptr;
-
 // Memory allocation buffer arena for network tensor processing layers
 // This is a common practice in memory-constrained embedded systems.
 const int kTensorArenaSize = 25 * 1024; // 25 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // Aligned to 16 bytes for hardware vector speedup
-
 // Scaling parameters to normalize the raw IMU data before feeding it into the neural network model.
 const float g_mean[] = {1906.18630431, 5231.88101198, -4316.21812981, 10.75862685, -274.85723225, -202.32853567};
 const float g_std[] = {6616.99734886, 12900.50103468, 5838.89261839, 4586.6168787, 6332.61625367, 6228.89244874};
@@ -48,14 +46,11 @@ void read_imu_data(float* input_data) {
 void setup() {
     // target specific initialization for TensorFlow Lite Micro
     tflite::InitializeTarget();
-    
     // Initialize required pins
     init_GPIO_pins();
     init_UART2();
     init_TIM2();
-
     UART_printf("Initializing TFLite Micro...\r\n");
-
     // Checks if the model's schema version matches the TFLite Micro library's expected version.
     model = tflite::GetModel(enhanced_activity_model);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
@@ -63,11 +58,9 @@ void setup() {
                     TFLITE_SCHEMA_VERSION, model->version());
         return;
     }
-
     // Registers only "Fully Connected" and "Softmax" layers that my model uses
     op_resolver.AddFullyConnected(); 
     op_resolver.AddSoftmax();
-
     // Creates an interpreter instance, linking the model, op resolver, and the tensor arena.
     static tflite::MicroInterpreter static_interpreter(
         model, op_resolver, g_tensor_arena, kTensorArenaSize
