@@ -1,4 +1,4 @@
-#include "board_setup.h"
+/* #include "board_setup.h"
 #include "BMI270.h"
 
 // TensorFlow Lite Micro Headers
@@ -191,6 +191,7 @@ void loop() {
 
 
 int main(void) {
+
     // Resets all peripherals, Initializes the Flash interface and the Systick.
     HAL_Init();
     
@@ -198,6 +199,100 @@ int main(void) {
     setup();
     while (1) {
         // infinite loop to continuously read IMU data, perform inference, and output results
+        loop();
+    }
+}
+*/
+
+/* This content would typically be in a file named `main.cpp` */
+#include "board_setup.h"
+#include "BMI270.h"
+
+// Declare I2C Handle globally (defined in board_setup.h or similar)
+// For this example, we'll redefine it for clarity, assuming it's externed elsewhere.
+I2C_HandleTypeDef hi2c1;
+
+// Instantiate BMI270 class globally, passing the address of the I2C handle
+BMI270 bmi270_sensor(&hi2c1);
+
+// Error handler function for I2C initialization failures
+void Error_Handler() {
+    UART_printf("I2C Initialization Error! Check connections and configurations.\r\n");
+    while (1) {
+        // Stay here to indicate error
+    }
+}
+
+// Function to initialize I2C for BMI270
+void init_I2C_BMI270() {
+    hi2c1.Instance = I2C1; // Use I2C1 peripheral
+    // Example timing for 100kHz, adjust for your clock and desired speed
+    hi2c1.Init.Timing = 0x00702991;
+    hi2c1.Init.OwnAddress1 = 0; // Master mode, so no own address needed
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
+        // Error handling if I2C initialization fails
+        Error_Handler(); // You should define an Error_Handler function
+    }
+    // Enable the Analog Noise Filter
+    if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK) {
+        Error_Handler();
+    }
+    // Enable the Digital Noise Filter (optional, depends on your needs)
+    if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK) {
+        Error_Handler();
+    }
+    UART_printf("I2C1 Initialized.\r\n");
+}
+
+void setup() {
+    // Initialize required pins (assuming they include UART for printf)
+    init_GPIO_pins();
+    init_UART2();
+    
+    UART_printf("Initializing I2C for BMI270...");
+    init_I2C_BMI270();
+
+    UART_printf("Initializing BMI270 sensor...");
+    // Initialize the BMI270 sensor
+    if (bmi270_sensor.init() != 0) {
+        UART_printf("Failed to initialize BMI270 sensor! Check connections and sensor power.\r\n");
+        while(1){}
+    } else {
+        UART_printf("BMI270 sensor initialized successfully!\r\n");
+    }
+}
+
+void loop() {
+    bmi270_sensor_data_t sensor_data;
+    
+    // Read sensor data
+    if (bmi270_sensor.readSensorData(&sensor_data) == 0) {
+        UART_printf("Acc: X=%.2f, Y=%.2f, Z=%.2f m/s^2 | Gyro: X=%.2f, Y=%.2f, Z=%.2f deg/s\r\n",
+                    sensor_data.acc_x, sensor_data.acc_y, sensor_data.acc_z,
+                    sensor_data.gyr_x, sensor_data.gyr_y, sensor_data.gyr_z);
+    } else {
+        UART_printf("Error reading BMI270 data!\r\n");
+    }
+    
+    // Delay for a bit to make output readable
+    HAL_Delay(100); // 100 ms delay
+}
+
+int main(void) {
+    // Resets all peripherals, Initializes the Flash interface and the Systick.
+    HAL_Init();
+
+    // Called once to initialize everything
+    setup();
+    
+    while (1) {
+        // infinite loop to continuously read IMU data and print results
         loop();
     }
 }
