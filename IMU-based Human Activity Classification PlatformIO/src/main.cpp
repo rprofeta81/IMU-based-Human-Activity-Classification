@@ -205,7 +205,7 @@ int main(void) {
 */
 
 #include "board_setup.h"
-#include "BMI270.h"
+#include "bmi270.h"
 
 // Declare I2C Handle globally (defined in board_setup.h or similar)
 // For this example, we'll redefine it for clarity, assuming it's externed elsewhere.
