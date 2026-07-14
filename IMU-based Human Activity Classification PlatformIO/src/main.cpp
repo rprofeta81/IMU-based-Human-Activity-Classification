@@ -204,7 +204,6 @@ int main(void) {
 }
 */
 
-/* This content would typically be in a file named `main.cpp` */
 #include "board_setup.h"
 #include "BMI270.h"
 
@@ -223,38 +222,64 @@ void Error_Handler() {
     }
 }
 
-// Function to initialize I2C for BMI270
+// Function to initialize the I2C1 peripheral structure
 void init_I2C_BMI270() {
     hi2c1.Instance = I2C1; // Use I2C1 peripheral
-    // Example timing for 100kHz, adjust for your clock and desired speed
-    hi2c1.Init.Timing = 0x00702991;
-    hi2c1.Init.OwnAddress1 = 0; // Master mode, so no own address needed
+    
+    // Timing configuration for 100kHz Standard Mode (Assuming a 16MHz or 80MHz internal clock)
+    // Adjust this value based on your exact STM32L4 system clock if needed.
+    hi2c1.Init.Timing = 0x00702991; 
+    hi2c1.Init.OwnAddress1 = 0; 
     hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
     hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
     hi2c1.Init.OwnAddress2 = 0;
     hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
     hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    
+    // This call automatically triggers HAL_I2C_MspInit underneath!
     if (HAL_I2C_Init(&hi2c1) != HAL_OK) {
-        // Error handling if I2C initialization fails
-        Error_Handler(); // You should define an Error_Handler function
+        Error_Handler(); 
     }
     // Enable the Analog Noise Filter
     if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK) {
         Error_Handler();
     }
-    // Enable the Digital Noise Filter (optional, depends on your needs)
+    // Disable the Digital Noise Filter
     if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK) {
         Error_Handler();
     }
-    UART_printf("I2C1 Initialized.\r\n");
+    UART_printf("I2C1 Peripheral and Pins Initialized.\r\n");
+}
+
+
+// --- MANDATORY HAL CALLBACK FUNCTION ---
+// The HAL library automatically runs this function during HAL_I2C_Init() 
+// to configure low-level clocks and physical pin hardware.
+void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c) {
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    
+    if (hi2c->Instance == I2C1) {
+        __HAL_RCC_I2C1_CLK_ENABLE();
+        __HAL_RCC_GPIOB_CLK_ENABLE(); 
+
+        // Change from PIN_6 | PIN_7 to PIN_8 | PIN_9
+        GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9; 
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;          
+        GPIO_InitStruct.Pull = GPIO_PULLUP;             
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+        GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;       
+        
+        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    }
 }
 
 void setup() {
-    // Initialize required pins (assuming they include UART for printf)
+    // Initialize required pins
     init_GPIO_pins();
     init_UART2();
     
+    HAL_Delay(100); // Short delay to ensure UART is ready
     UART_printf("Initializing I2C for BMI270...");
     init_I2C_BMI270();
 

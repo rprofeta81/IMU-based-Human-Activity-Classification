@@ -7,11 +7,11 @@
 # include "stm32l4xx_hal.h"
 # include "stm32l4xx_hal_i2c.h"
 
-// Define BMI270 I2C address (can be 0x68 or 0x69 depending on SDO pin state)
+// Define BMI270 I2C address 
 # define BMI270_I2C_ADDR_PRIMARY   (0x68 << 1) // 7-bit address 0x68, shifted for 8-bit R/W
 # define BMI270_I2C_ADDR_SECONDARY (0x69 << 1) // 7-bit address 0x69, shifted for 8-bit R/W
 
-// BMI270 Register addresses (simplified, refer to datasheet for full list)
+// BMI270 Register addresses 
 # define BMI270_CHIP_ID_ADDR       0x00
 # define BMI270_ACC_CONF_ADDR      0x40 // ODR, Range, BW, etc.
 # define BMI270_GYR_CONF_ADDR      0x42 // ODR, Range, BW, etc.
