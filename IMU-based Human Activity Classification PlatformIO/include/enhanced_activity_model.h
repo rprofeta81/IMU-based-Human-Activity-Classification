@@ -1,10 +1,13 @@
-
 #ifndef ENHANCED_ACTIVITY_MODEL_H
 #define ENHANCED_ACTIVITY_MODEL_H
 
+// Include cstdint for standard integer types if not already present
+#include <cstdint> 
+
 const unsigned int enhanced_activity_model_len = 9424;
 
-const unsigned char enhanced_activity_model[9424] = {
+// Add alignas(4) to force 4-byte memory alignment
+alignas(4) const unsigned char enhanced_activity_model[9424] = {
     0x1c, 0x00, 0x00, 0x00, 0x54, 0x46, 0x4c, 0x33,
     0x14, 0x00, 0x20, 0x00, 0x1c, 0x00, 0x18, 0x00,
     0x14, 0x00, 0x10, 0x00, 0x0c, 0x00, 0x00, 0x00,
