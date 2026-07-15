@@ -8,7 +8,7 @@
 #include "tensorflow/lite/micro/micro_log.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-#include "enhanced_activity_model.h"
+#include "activity_model.h"
 
 // defining activity labels
 const char* activity_labels_cpp[] = {
@@ -36,7 +36,7 @@ TfLiteTensor* output_tensor = nullptr;
 
 // Memory allocation buffer arena for network tensor processing layers
 // This is a common practice in memory-constrained embedded systems.
-const int kTensorArenaSize = 80 * 1024; // 80 KB
+const int kTensorArenaSize = 90 * 1024; // 100 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // Aligned to 16 bytes for hardware vector speedup
 
 // Scaling parameters to normalize the raw IMU data before feeding it into the neural network model.
@@ -137,7 +137,7 @@ void setup() {
         UART_printf("BMI270 sensor initialized successfully!\r\n");
     }
     UART_printf("Initializing TFLite Micro...\r\n");
-    model = tflite::GetModel(enhanced_activity_model);
+    model = tflite::GetModel(activity_model);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         UART_printf("Model schema version mismatch! Expected %d, got %d.\r\n",
                     TFLITE_SCHEMA_VERSION, (int)model->version());
