@@ -1,7 +1,7 @@
 #include "board_setup.h"
 #include "bmi270.h"
 
-// TensorFlow Lite Micro Headers
+// TFLite Micro Headers
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/system_setup.h"
@@ -30,13 +30,13 @@ BMI270 bmi270_sensor(&hi2c1);
 // perform inference, resolve operations, and interact with input/output data.
 const tflite::Model* model = nullptr;
 tflite::MicroInterpreter* interpreter = nullptr;
-tflite::MicroMutableOpResolver<10> op_resolver;
+tflite::MicroMutableOpResolver<15> op_resolver;
 TfLiteTensor* input_tensor = nullptr;
 TfLiteTensor* output_tensor = nullptr;
 
 // Memory allocation buffer arena for network tensor processing layers
 // This is a common practice in memory-constrained embedded systems.
-const int kTensorArenaSize = 60 * 1024; // 60 KB
+const int kTensorArenaSize = 80 * 1024; // 80 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // Aligned to 16 bytes for hardware vector speedup
 
 // Scaling parameters to normalize the raw IMU data before feeding it into the neural network model.
@@ -143,13 +143,15 @@ void setup() {
                     TFLITE_SCHEMA_VERSION, (int)model->version());
         while(1){}
     }
-    // Register your primary layers
     op_resolver.AddFullyConnected();
     op_resolver.AddSoftmax();
-    // Register the hidden utility layers added during TFLite conversion
     op_resolver.AddReshape();
     op_resolver.AddQuantize();
     op_resolver.AddDequantize();
+    op_resolver.AddExpandDims(); 
+    op_resolver.AddMul();
+    op_resolver.AddAdd();
+    op_resolver.AddSub();
     static tflite::MicroInterpreter static_interpreter(
         model, op_resolver, g_tensor_arena, kTensorArenaSize
     );
