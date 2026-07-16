@@ -26,38 +26,34 @@ I2C_HandleTypeDef hi2c1;
 // Instantiate BMI270 class globally, passing the address of the I2C handle
 BMI270 bmi270_sensor(&hi2c1);
 
-// Pointers and objects used by TensorFlow Lite Micro to manage the model,
-// perform inference, resolve operations, and interact with input/output data.
-const tflite::Model* model = nullptr;
+// Pointers and objects used by TFLite Micro
+const tflite::Model* model = nullptr;               //initialized to nullptr to avoid dangling pointer issues
 tflite::MicroInterpreter* interpreter = nullptr;
-tflite::MicroMutableOpResolver<15> op_resolver;
-TfLiteTensor* input_tensor = nullptr;
+tflite::MicroMutableOpResolver<15> op_resolver;     //allows up to 15 operators to be registered
+TfLiteTensor* input_tensor = nullptr;      
 TfLiteTensor* output_tensor = nullptr;
 
-// Memory allocation buffer arena for network tensor processing layers
-// This is a common practice in memory-constrained embedded systems.
-const int kTensorArenaSize = 90 * 1024; // 100 KB
-alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // Aligned to 16 bytes for hardware vector speedup
+// memory allocation  arena for network tensor processing layers
+const int kTensorArenaSize = 90 * 1024;               // 90 KB
+alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // aligned to 16 bytes for hardware vector speedup
 
-// Scaling parameters to normalize the raw IMU data before feeding it into the neural network model.
+// scaling parameters to normalize the raw IMU data before feeding it into the neural network model
 const float g_mean[] = {1906.18630431, 5231.88101198, -4316.21812981, 10.75862685, -274.85723225, -202.32853567};
 const float g_std[] = {6616.99734886, 12900.50103468, 5838.89261839, 4586.6168787, 6332.61625367, 6228.89244874};
 
-// Error handler function for I2C initialization failures
+// error handler function for I2C initialization failures
 void Error_Handler() {
     UART_printf("I2C Initialization Error! Check connections and configurations.\r\n");
     while (1) {
-        // Stay here to indicate error
+        // Stay here if detected
     }
 }
 
-// Function to initialize the I2C1 peripheral structure
+// function to initialize the I2C1 peripheral structure
 void init_I2C_BMI270() {
-    hi2c1.Instance = I2C1; // Use I2C1 peripheral
-
-    // Timing configuration for 100kHz Standard Mode (Assuming a 16MHz or 80MHz internal clock)
-    // Adjust this value based on your exact STM32L4 system clock if needed.
-    hi2c1.Init.Timing = 0x00702991;
+    hi2c1.Instance = I2C1; // use I2C1 peripheral
+    // timing configuration for 100kHz Standard Mode (Assuming 16MHz or 80MHz internal clock)
+    hi2c1.Init.Timing = 0x00702991;     // 400KHz Fast Mode timing for 80MHz clock
     hi2c1.Init.OwnAddress1 = 0;
     hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
     hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
