@@ -46,7 +46,8 @@ void Error_Handler() {
 
 // function to initialize the I2C1 peripheral structure
 void init_I2C_BMI270() {
-    hi2c1.Instance = I2C1; // use I2C1 peripheral
+    hi2c1.Instance = I2C1;      // use I2C1 peripheral
+    
     // timing configuration for 100kHz Standard Mode (Assuming 80MHz internal clock)
     hi2c1.Init.Timing = 0x00702991;     // 400KHz Fast Mode timing for 80MHz clock
     hi2c1.Init.OwnAddress1 = 0;
@@ -107,6 +108,7 @@ void read_imu_data(float* input_data) {
     }
 }
 
+//configures board, tflite, and sensor
 void setup() {
     // target specific initialization for TensorFlow Lite Micro
     tflite::InitializeTarget();
@@ -159,6 +161,7 @@ void setup() {
     UART_printf("TFLite Micro initialized successfully!\r\n");
 }
 
+//main loop to read IMU data, perform inference, and output results
 void loop() {
     // STM32 hardware SysTick Delay for 2.5s
     HAL_Delay(2500);   
