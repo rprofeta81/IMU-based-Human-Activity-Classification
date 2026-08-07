@@ -206,8 +206,31 @@ int main(void) {
     HAL_Init();
     // Called once to initialize everything
     setup();
+
+    // Print CSV Header on startup for new data logging session
+    UART_printf("Timestamp_ms,Accel_X,Accel_Y,Accel_Z,Gyro_X,Gyro_Y,Gyro_Z\r\n");
+    float imu_data[6] = {0.0f};
+    //
+
     while (1) {
         // infinite loop to continuously read IMU data, perform inference, and output results
-        loop();
+        //loop();
+
+        // Get current timestamp in milliseconds since system start
+        uint32_t timestamp = HAL_GetTick();
+        // Read sensor values into array
+        read_imu_data(imu_data);
+        // Convert floats to integer parts for sprintf formatting with UART_printf
+        int ax_i = (int)imu_data[0], ax_f = (int)(abs(imu_data[0] - ax_i) * 10000);
+        int ay_i = (int)imu_data[1], ay_f = (int)(abs(imu_data[1] - ay_i) * 10000);
+        int az_i = (int)imu_data[2], az_f = (int)(abs(imu_data[2] - az_i) * 10000);
+        int gx_i = (int)imu_data[3], gx_f = (int)(abs(imu_data[3] - gx_i) * 10000);
+        int gy_i = (int)imu_data[4], gy_f = (int)(abs(imu_data[4] - gy_i) * 10000);
+        int gz_i = (int)imu_data[5], gz_f = (int)(abs(imu_data[5] - gz_i) * 10000);
+        UART_printf("%lu,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d\r\n", 
+                    timestamp, 
+                    ax_i, ax_f, ay_i, ay_f, az_i, az_f,
+                    gx_i, gx_f, gy_i, gy_f, gz_i, gz_f);
+        HAL_Delay(10); // 100 Hz sampling interval
     }
 }
