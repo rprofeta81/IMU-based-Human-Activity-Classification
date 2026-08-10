@@ -47,7 +47,6 @@ void Error_Handler() {
 // function to initialize the I2C1 peripheral structure
 void init_I2C_BMI270() {
     hi2c1.Instance = I2C1;      // use I2C1 peripheral
-    
     // timing configuration for 100kHz Standard Mode (Assuming 80MHz internal clock)
     hi2c1.Init.Timing = 0x00702991;     // 400KHz Fast Mode timing for 80MHz clock
     hi2c1.Init.OwnAddress1 = 0;
@@ -73,25 +72,22 @@ void init_I2C_BMI270() {
 }
 
 
-// The HAL library automatically runs this function during HAL_I2C_Init()
-// to configure low-level clocks and physical pin hardware.
+// Configures low-level clocks and physical pin hardware.
 void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
-
     if (hi2c->Instance == I2C1) {
         __HAL_RCC_I2C1_CLK_ENABLE();
         __HAL_RCC_GPIOB_CLK_ENABLE();
-
         // Change from PIN_6 | PIN_7 to PIN_8 | PIN_9
         GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
         GPIO_InitStruct.Pull = GPIO_PULLUP;
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
         GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
-
         HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
     }
 }
+
 
 // Function to read IMU data from BMI270
 void read_imu_data(float* input_data) {
@@ -108,7 +104,8 @@ void read_imu_data(float* input_data) {
     }
 }
 
-//configures board, tflite, and sensor
+
+// Configures board, tflite, and sensor
 void setup() {
     // target specific initialization for TensorFlow Lite Micro
     tflite::InitializeTarget();
@@ -116,11 +113,11 @@ void setup() {
     init_GPIO_pins();
     init_UART2();
     init_TIM2(); 
-    HAL_Delay(100); // Short delay to ensure UART is ready
+    HAL_Delay(100);     // Short delay to ensure UART is ready
     UART_printf("Initializing I2C for BMI270...\r\n");
     init_I2C_BMI270();
+
     UART_printf("Initializing BMI270 sensor...\r\n");
-    
     // initialize the BMI270 sensor
     if (bmi270_sensor.init() != 0) {
         UART_printf("Failed to initialize BMI270 sensor! Check connections and sensor power.\r\n");
@@ -128,6 +125,7 @@ void setup() {
     } else {
         UART_printf("BMI270 sensor initialized successfully!\r\n");
     }
+
     UART_printf("Initializing TFLite Micro...\r\n");
     model = tflite::GetModel(activity_model);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
@@ -135,7 +133,9 @@ void setup() {
                     TFLITE_SCHEMA_VERSION, (int)model->version());
         while(1){}
     }
-    //include the required operators for the model to function correctly
+    UART_printf("TFLite Micro initialized successfully!\r\n");
+
+    // From TFLite include the required operators
     op_resolver.AddFullyConnected();
     op_resolver.AddSoftmax();
     op_resolver.AddReshape();
@@ -161,22 +161,27 @@ void setup() {
     UART_printf("TFLite Micro initialized successfully!\r\n");
 }
 
-//main loop to read IMU data, perform inference, and output results
+//main loop to:
+    //read IMU data, 
+    //perform inference, 
+    //and output results
 void loop() {
     // STM32 hardware SysTick Delay for 2.5s
     HAL_Delay(2500);   
     UART_printf("\r\nReading IMU data...\r\n");
     float raw_imu_data[6];
     read_imu_data(raw_imu_data);
-   for (int i = 0; i < 6; ++i) {
-    input_tensor->data.f[i] = raw_imu_data[i];
-   }
+    for (int i = 0; i < 6; ++i) {
+        input_tensor->data.f[i] = raw_imu_data[i];
+    }
+
     // model performs its inference on the provided input data
     TfLiteStatus invoke_status = interpreter->Invoke();
     if (invoke_status != kTfLiteOk) {
         UART_printf("Invoke failed!");
         return;
     }
+    
     // retrieves the prediction probabilities from the model's output tensor
     float* output_scores = output_tensor->data.f;
     // finds the index of the output_scores array that has the highest value
@@ -199,24 +204,9 @@ void loop() {
     }
 }
 
-
-
-int main(void) {
-    // Resets all peripherals, Initializes the Flash interface and the Systick.
-    HAL_Init();
-    // Called once to initialize everything
-    setup();
-
-    // Print CSV Header on startup for new data logging session
-    UART_printf("Timestamp_ms,Accel_X,Accel_Y,Accel_Z,Gyro_X,Gyro_Y,Gyro_Z\r\n");
-    float imu_data[6] = {0.0f};
-    //
-
-    while (1) {
-        // infinite loop to continuously read IMU data, perform inference, and output results
-        //loop();
-
-        // Get current timestamp in milliseconds since system start
+// Function to collect IMU data and print it in CSV format
+void collect(){
+    // Get current timestamp in milliseconds since system start
         uint32_t timestamp = HAL_GetTick();
         // Read sensor values into array
         read_imu_data(imu_data);
@@ -232,5 +222,24 @@ int main(void) {
                     ax_i, ax_f, ay_i, ay_f, az_i, az_f,
                     gx_i, gx_f, gy_i, gy_f, gz_i, gz_f);
         HAL_Delay(10); // 100 Hz sampling interval
+}
+
+
+int main(void) {
+    // Resets all peripherals, Initializes the Flash interface and the Systick.
+    HAL_Init();
+    // Called once to initialize everything
+    setup();
+
+    // Print CSV Header on startup for new data logging session
+    UART_printf("Timestamp_ms,Accel_X,Accel_Y,Accel_Z,Gyro_X,Gyro_Y,Gyro_Z\r\n");
+    float imu_data[6] = {0.0f};
+    //
+
+    while (1) {
+    //loop();               //UNCOMMENT WHEN READY TO PERFORM INFERENCE
+    
+    collect();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+        
     }
 }
