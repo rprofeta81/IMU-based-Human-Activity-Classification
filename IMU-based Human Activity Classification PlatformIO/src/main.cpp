@@ -161,11 +161,8 @@ void setup() {
     UART_printf("TFLite Micro initialized successfully!\r\n");
 }
 
-//main loop to:
-    //read IMU data, 
-    //perform inference, 
-    //and output results
-void loop() {
+//main loop that: reads IMU data, performs inference, and outputs results
+void inference_loop() {
     // STM32 hardware SysTick Delay for 2.5s
     HAL_Delay(2500);   
     UART_printf("\r\nReading IMU data...\r\n");
@@ -204,26 +201,61 @@ void loop() {
     }
 }
 
-// Function to collect IMU data and print it in CSV format
-void collect(){
-    // Get current timestamp in milliseconds since system start
-        uint32_t timestamp = HAL_GetTick();
-        // Read sensor values into array
-        read_imu_data(imu_data);
-        // Convert floats to integer parts for sprintf formatting with UART_printf
-        int ax_i = (int)imu_data[0], ax_f = (int)(abs(imu_data[0] - ax_i) * 10000);
-        int ay_i = (int)imu_data[1], ay_f = (int)(abs(imu_data[1] - ay_i) * 10000);
-        int az_i = (int)imu_data[2], az_f = (int)(abs(imu_data[2] - az_i) * 10000);
-        int gx_i = (int)imu_data[3], gx_f = (int)(abs(imu_data[3] - gx_i) * 10000);
-        int gy_i = (int)imu_data[4], gy_f = (int)(abs(imu_data[4] - gy_i) * 10000);
-        int gz_i = (int)imu_data[5], gz_f = (int)(abs(imu_data[5] - gz_i) * 10000);
-        UART_printf("%lu,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d\r\n", 
-                    timestamp, 
-                    ax_i, ax_f, ay_i, ay_f, az_i, az_f,
-                    gx_i, gx_f, gy_i, gy_f, gz_i, gz_f);
+// Collects raw 16-bit integer IMU readings for a specific activity ID
+void collect_activity(int activity_id, const char* activity_name, uint32_t duration_ms) {
+    // 10-second prep window
+    UART_printf("\r\n========================================\r\n");
+    UART_printf("PREPARE FOR: %s (ID: %d)\r\n", activity_name, activity_id);
+    UART_printf("Set treadmill speed now!\r\n");
+    UART_printf("========================================\r\n");
+    
+    for (int i = 10; i > 0; --i) {
+        UART_printf("Starting in %d seconds...\r\n", i);
+        HAL_Delay(1000);
+    }
+
+    UART_printf("--- RECORDING %s ---\r\n", activity_name);
+
+    uint32_t start_time = HAL_GetTick();
+    bmi270_sensor_data_t raw_data;
+
+    // Record for target duration (180,000 ms = 3 min)
+    while ((HAL_GetTick() - start_time) < duration_ms) {
+        if (bmi270_sensor.readSensorData(&raw_data) == 0) {
+            // Outputs raw 16-bit integer LSB values directly: ax,ay,az,gx,gy,gz,activity
+            UART_printf("%d,%d,%d,%d,%d,%d,%d\r\n", 
+                        (int)raw_data.acc_x, 
+                        (int)raw_data.acc_y, 
+                        (int)raw_data.acc_z, 
+                        (int)raw_data.gyr_x, 
+                        (int)raw_data.gyr_y, 
+                        (int)raw_data.gyr_z, 
+                        activity_id);
+        }
+
         HAL_Delay(10); // 100 Hz sampling interval
+    }
+
+    UART_printf("--- COMPLETED %s ---\r\n", activity_name);
 }
 
+// Sequence through all 4 activity classes
+void collect_all() {
+    uint32_t duration_3_min = 3 * 60 * 1000; // 180,000 ms
+
+    // Header matching your target format
+    UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
+
+    // 1 = Standing, 2 = Walking, 3 = Fast Walking, 4 = Running
+    collect_activity(1, "Standing (0 mph)", duration_3_min);
+    collect_activity(2, "Walking (2 mph)", duration_3_min);
+    collect_activity(3, "Fast Walking (4 mph)", duration_3_min);
+    collect_activity(4, "Running (7 mph)", duration_3_min);
+
+    UART_printf("\r\n========================================\r\n");
+    UART_printf("ALL DATA COLLECTION COMPLETE!\r\n");
+    UART_printf("========================================\r\n");
+}
 
 int main(void) {
     // Resets all peripherals, Initializes the Flash interface and the Systick.
@@ -233,13 +265,15 @@ int main(void) {
 
     // Print CSV Header on startup for new data logging session
     UART_printf("Timestamp_ms,Accel_X,Accel_Y,Accel_Z,Gyro_X,Gyro_Y,Gyro_Z\r\n");
-    float imu_data[6] = {0.0f};
-    //
 
-    while (1) {
-    //loop();               //UNCOMMENT WHEN READY TO PERFORM INFERENCE
-    
-    collect();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+        // MAIN DEAD LOOP: Uncomment the desired function to run either inference or data collection
+        while (1) {
+        //inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
         
-    }
+        collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+            while(1) {
+                HAL_Delay(1000);// Stay here after data collection is complete
+            }
+            
+        }
 }
