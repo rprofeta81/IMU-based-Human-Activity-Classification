@@ -3,6 +3,7 @@
 #include "board_setup.h"
 #include "bmi270.h"
 #include "activity_model.h"
+#include "math.h"
 
 // TFLite Micro Headers
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
@@ -201,7 +202,6 @@ void inference_loop() {
     }
 }
 
-// Collects raw 16-bit integer IMU readings for a specific activity ID
 void collect_activity(int activity_id, const char* activity_name, uint32_t duration_ms) {
     // 10-second prep window
     UART_printf("\r\n========================================\r\n");
@@ -219,21 +219,24 @@ void collect_activity(int activity_id, const char* activity_name, uint32_t durat
     uint32_t start_time = HAL_GetTick();
     bmi270_sensor_data_t raw_data;
 
-    // Record for target duration (180,000 ms = 3 min)
     while ((HAL_GetTick() - start_time) < duration_ms) {
         if (bmi270_sensor.readSensorData(&raw_data) == 0) {
-            // Outputs raw 16-bit integer LSB values directly: ax,ay,az,gx,gy,gz,activity
-            UART_printf("%d,%d,%d,%d,%d,%d,%d\r\n", 
-                        (int)raw_data.acc_x, 
-                        (int)raw_data.acc_y, 
-                        (int)raw_data.acc_z, 
-                        (int)raw_data.gyr_x, 
-                        (int)raw_data.gyr_y, 
-                        (int)raw_data.gyr_z, 
+            // Split float values into integer and fractional parts (4 decimal places)
+            int ax_i = (int)raw_data.acc_x, ax_f = (int)(fabsf(raw_data.acc_x - ax_i) * 10000);
+            int ay_i = (int)raw_data.acc_y, ay_f = (int)(fabsf(raw_data.acc_y - ay_i) * 10000);
+            int az_i = (int)raw_data.acc_z, az_f = (int)(fabsf(raw_data.acc_z - az_i) * 10000);
+            int gx_i = (int)raw_data.gyr_x, gx_f = (int)(fabsf(raw_data.gyr_x - gx_i) * 10000);
+            int gy_i = (int)raw_data.gyr_y, gy_f = (int)(fabsf(raw_data.gyr_y - gy_i) * 10000);
+            int gz_i = (int)raw_data.gyr_z, gz_f = (int)(fabsf(raw_data.gyr_z - gz_i) * 10000);
+
+            // Print with 4 decimal places per axis + activity integer at the end
+            UART_printf("%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d\r\n", 
+                        ax_i, ax_f, ay_i, ay_f, az_i, az_f,
+                        gx_i, gx_f, gy_i, gy_f, gz_i, gz_f,
                         activity_id);
         }
 
-        HAL_Delay(10); // 100 Hz sampling interval
+        HAL_Delay(10); // 100 Hz sampling rate
     }
 
     UART_printf("--- COMPLETED %s ---\r\n", activity_name);
@@ -258,15 +261,15 @@ void collect_all() {
 }
 
 int main(void) {
-    // Resets all peripherals, Initializes the Flash interface and the Systick.
+    // Resets all peripherals, initializes the flash interface and the systick.
     HAL_Init();
-    // Called once to initialize everything
+    // Called once to initialize the board, TensorFlow Lite Micro, and the BMI270 sensor
     setup();
 
     // Print CSV Header on startup for new data logging session
     UART_printf("Timestamp_ms,Accel_X,Accel_Y,Accel_Z,Gyro_X,Gyro_Y,Gyro_Z\r\n");
 
-        // MAIN DEAD LOOP: Uncomment the desired function to run either inference or data collection
+        // MAIN DEAD LOOP: Uncomment the desired function to run either real-timeinference or data collection
         while (1) {
         //inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
         
