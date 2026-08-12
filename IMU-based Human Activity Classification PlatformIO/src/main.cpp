@@ -202,26 +202,54 @@ void inference_loop() {
     }
 }
 
-void collect_activity(int activity_id, const char* activity_name, uint32_t duration_ms) {
-    // 10-second prep window
+// Pauses execution until you press the Blue User Button on the Nucleo board
+void wait_for_user_ready(const char* activity_name, int activity_id) {
+    // Enable GPIOC hardware clock & configure Pin 13
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    GPIO_InitStruct.Pin = GPIO_PIN_13;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
     UART_printf("\r\n========================================\r\n");
-    UART_printf("PREPARE FOR: %s (ID: %d)\r\n", activity_name, activity_id);
-    UART_printf("Set treadmill speed now!\r\n");
+    UART_printf("READY FOR CLASS %d: %s\r\n", activity_id, activity_name);
+    UART_printf("Adjust treadmill speed, then PRESS BLUE USER BUTTON...\r\n");
     UART_printf("========================================\r\n");
-    
-    for (int i = 10; i > 0; --i) {
-        UART_printf("Starting in %d seconds...\r\n", i);
-        HAL_Delay(1000);
+
+    // Wait until button is pressed (PC13 drops LOW when pressed)
+    while (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_SET) {
+        HAL_Delay(50);
     }
 
+    // Wait until button is released
+    while (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
+        HAL_Delay(50);
+    }
+
+    // 5-second countdown to get into position
+    for (int i = 5; i > 0; --i) {
+        UART_printf("Recording in %d...\r\n", i);
+        HAL_Delay(1000);
+    }
+}
+
+// Collects IMU data for a single activity class
+void collect_activity(int activity_id, const char* activity_name, uint32_t duration_ms) {
+    // Wait for physical button press before starting
+    wait_for_user_ready(activity_name, activity_id);
+
+    UART_printf("========================================\r\n");
+    UART_printf("========================================\r\n");
     UART_printf("--- RECORDING %s ---\r\n", activity_name);
+    UART_printf("========================================\r\n");
+    UART_printf("========================================\r\n");
 
     uint32_t start_time = HAL_GetTick();
     bmi270_sensor_data_t raw_data;
 
     while ((HAL_GetTick() - start_time) < duration_ms) {
         if (bmi270_sensor.readSensorData(&raw_data) == 0) {
-            // Split float values into integer and fractional parts (4 decimal places)
             int ax_i = (int)raw_data.acc_x, ax_f = (int)(fabsf(raw_data.acc_x - ax_i) * 10000);
             int ay_i = (int)raw_data.acc_y, ay_f = (int)(fabsf(raw_data.acc_y - ay_i) * 10000);
             int az_i = (int)raw_data.acc_z, az_f = (int)(fabsf(raw_data.acc_z - az_i) * 10000);
@@ -229,27 +257,27 @@ void collect_activity(int activity_id, const char* activity_name, uint32_t durat
             int gy_i = (int)raw_data.gyr_y, gy_f = (int)(fabsf(raw_data.gyr_y - gy_i) * 10000);
             int gz_i = (int)raw_data.gyr_z, gz_f = (int)(fabsf(raw_data.gyr_z - gz_i) * 10000);
 
-            // Print with 4 decimal places per axis + activity integer at the end
             UART_printf("%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d\r\n", 
                         ax_i, ax_f, ay_i, ay_f, az_i, az_f,
                         gx_i, gx_f, gy_i, gy_f, gz_i, gz_f,
                         activity_id);
         }
-
         HAL_Delay(10); // 100 Hz sampling rate
     }
-
+    UART_printf("========================================\r\n");
+    UART_printf("========================================\r\n");
     UART_printf("--- COMPLETED %s ---\r\n", activity_name);
+    UART_printf("========================================\r\n");
+    UART_printf("========================================\r\n");
+
 }
 
-// Sequence through all 4 activity classes
 void collect_all() {
-    uint32_t duration_3_min = 3 * 60 * 1000; // 180,000 ms
+    uint32_t duration_3_min = 3 * 60 * 1000; // 180,000 ms per class
 
-    // Header matching your target format
     UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
 
-    // 1 = Standing, 2 = Walking, 3 = Fast Walking, 4 = Running
+    // Each call will halt until you press the blue button on the Nucleo
     collect_activity(1, "Standing (0 mph)", duration_3_min);
     collect_activity(2, "Walking (2 mph)", duration_3_min);
     collect_activity(3, "Fast Walking (4 mph)", duration_3_min);
