@@ -273,6 +273,7 @@ int main(void) {
         while (1) {
         //inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
         
+        // copy this into terminal to start data collection:     ~/.platformio/penv/bin/pio device monitor > full_dataset.csv
         collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
             while(1) {
                 HAL_Delay(1000);// Stay here after data collection is complete
