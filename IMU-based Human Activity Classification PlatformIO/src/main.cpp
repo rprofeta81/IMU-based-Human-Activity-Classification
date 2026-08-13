@@ -166,15 +166,19 @@ void inference_loop() {
     HAL_Delay(2500);   
     UART_printf("\r\nReading IMU data...\r\n");
     
-    // Normalization parameters for the input data (mean and scale) from Colab
-    const float scaler_mean[6]  = { 8.656450585189116, -1.9312176022786216, -2.7804464163645823, -0.0921642413257387, 0.09234816157431379, -0.021006172967374843 };
-    const float scaler_scale[6] = { 2.8983225004555058, 3.1306998218768114, 36.324794834381315, 57.31395915427559, 36.30224995315192 };
+    // Normalization parameters for the input data (mean and scale) calculated from Colab
+    const float scaler_mean[6]  = { 
+        8.65645058f, -1.93121760f, -2.78044642f, -0.09216424f,  0.09234816f, -0.02100617f
+    };
+    const float scaler_scale[6] = { 
+        4.78339646f,  2.89832250f,  3.13069982f, 36.32479483f, 57.31395915f, 36.30224995f
+    };
 
     // reads the latest IMU data and populates the input tensor
     float raw_imu_data[6];
     read_imu_data(raw_imu_data);
     for (int i = 0; i < 6; ++i) {
-        // Apply Z-score standardization before feeding the model
+        // Apply Z-score standardization: (x - mean) / scale
         input_tensor->data.f[i] = (raw_imu_data[i] - scaler_mean[i]) / scaler_scale[i]; // normalized
     }
 
