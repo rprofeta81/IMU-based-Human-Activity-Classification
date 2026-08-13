@@ -2,7 +2,7 @@
 #include "stm32l4xx_hal.h"
 #include "board_setup.h"
 #include "bmi270.h"
-#include "activity_model.h"
+#include "activity_model_RJ_0812.h"     //edit for data input
 #include "math.h"
 
 // TFLite Micro Headers
@@ -14,11 +14,9 @@
 
 // defining activity labels
 const char* activity_labels_cpp[] = {
-    "Walking Upstairs",
-    "Walking Downstairs",
-    "Walking",
-    "Sitting",
     "Standing",
+    "Walking",
+    "Walking Fast",
     "Jogging"
 };
 
@@ -167,31 +165,33 @@ void inference_loop() {
     // STM32 hardware SysTick Delay for 2.5s
     HAL_Delay(2500);   
     UART_printf("\r\nReading IMU data...\r\n");
+    // reads the latest IMU data and populates the input tensor
     float raw_imu_data[6];
     read_imu_data(raw_imu_data);
     for (int i = 0; i < 6; ++i) {
         input_tensor->data.f[i] = raw_imu_data[i];
     }
 
-    // model performs its inference on the provided input data
+    // invokes the TFLite Micro interpreter to run inference on the input data
     TfLiteStatus invoke_status = interpreter->Invoke();
     if (invoke_status != kTfLiteOk) {
         UART_printf("Invoke failed!");
         return;
     }
     
-    // retrieves the prediction probabilities from the model's output tensor
+    // 1. Point to the array of probabilities returned by Softmax
     float* output_scores = output_tensor->data.f;
-    // finds the index of the output_scores array that has the highest value
+    // 2. Argmax Loop: Find the highest probability in the array
     float max_score = -1.0f;
     int predicted_activity_index = -1;
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (output_scores[i] > max_score) {
             max_score = output_scores[i];
             predicted_activity_index = i;
         }
     }
-    // shows results in serial monitor with the predicted activity label and its corresponding score
+    
+    // 3. Prints the highest class label and split the float to show 4 decimal places
     if (predicted_activity_index != -1) {
         UART_printf("Predicted Activity: %s (Score: %d.%04d)\r\n",
                     activity_labels_cpp[predicted_activity_index],
