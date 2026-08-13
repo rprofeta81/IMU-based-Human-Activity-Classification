@@ -165,11 +165,17 @@ void inference_loop() {
     // STM32 hardware SysTick Delay for 2.5s
     HAL_Delay(2500);   
     UART_printf("\r\nReading IMU data...\r\n");
+    
+    // Normalization parameters for the input data (mean and scale) from Colab
+    const float scaler_mean[6]  = { 8.656450585189116, -1.9312176022786216, -2.7804464163645823, -0.0921642413257387, 0.09234816157431379, -0.021006172967374843 };
+    const float scaler_scale[6] = { 2.8983225004555058, 3.1306998218768114, 36.324794834381315, 57.31395915427559, 36.30224995315192 };
+
     // reads the latest IMU data and populates the input tensor
     float raw_imu_data[6];
     read_imu_data(raw_imu_data);
     for (int i = 0; i < 6; ++i) {
-        input_tensor->data.f[i] = raw_imu_data[i];
+        // Apply Z-score standardization before feeding the model
+        input_tensor->data.f[i] = (raw_imu_data[i] - scaler_mean[i]) / scaler_scale[i]; // normalized
     }
 
     // invokes the TFLite Micro interpreter to run inference on the input data
@@ -200,6 +206,10 @@ void inference_loop() {
     } else {
         UART_printf("Could not determine activity.\r\n");
     }
+
+    UART_printf("Raw IMU: ax=%.2f, ay=%.2f, az=%.2f | gx=%.2f, gy=%.2f, gz=%.2f\r\n",
+            raw_imu_data[0], raw_imu_data[1], raw_imu_data[2],
+            raw_imu_data[3], raw_imu_data[4], raw_imu_data[5]);
 }
 
 // Pauses execution until you press the Blue User Button on the Nucleo board
@@ -294,18 +304,17 @@ int main(void) {
     // Called once to initialize the board, TensorFlow Lite Micro, and the BMI270 sensor
     setup();
 
-    // Print CSV Header on startup for new data logging session
-    UART_printf("Timestamp_ms,Accel_X,Accel_Y,Accel_Z,Gyro_X,Gyro_Y,Gyro_Z\r\n");
-
         // MAIN DEAD LOOP: Uncomment the desired function to run either real-timeinference or data collection
         while (1) {
-        //inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
+        inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
         
         // copy this into terminal to start data collection:     ~/.platformio/penv/bin/pio device monitor > full_dataset.csv
-        collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
-            while(1) {
-                HAL_Delay(1000);// Stay here after data collection is complete
-            }
+        // Print CSV Header on startup for new data logging session
+        //UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
+        //collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+            //while(1) {
+                //HAL_Delay(1000);// Stay here after data collection is complete
+        
             
         }
 }
