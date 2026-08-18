@@ -2,7 +2,7 @@
 #include "stm32l4xx_hal.h"
 #include "board_setup.h"
 #include "bmi270.h"
-#include "activity_model_RJ_0812.h"     //edit for data input
+#include "activity_model_RJ_0818.h"     //edit for updated models
 #include "math.h"
 
 // TFLite Micro Headers
@@ -216,7 +216,9 @@ void inference_loop() {
             raw_imu_data[3], raw_imu_data[4], raw_imu_data[5]);
 }
 
-// Pauses execution until you press the Blue User Button on the Nucleo board
+#include <cmath>
+
+// 1. Pauses execution until you press the Blue User Button on the Nucleo board to start
 void wait_for_user_ready(const char* activity_name, int activity_id) {
     // Enable GPIOC hardware clock & configure Pin 13
     __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -228,7 +230,7 @@ void wait_for_user_ready(const char* activity_name, int activity_id) {
 
     UART_printf("\r\n========================================\r\n");
     UART_printf("READY FOR CLASS %d: %s\r\n", activity_id, activity_name);
-    UART_printf("Adjust treadmill speed, then PRESS BLUE USER BUTTON...\r\n");
+    UART_printf("Adjust treadmill / get in position, then PRESS BLUE USER BUTTON...\r\n");
     UART_printf("========================================\r\n");
 
     // Wait until button is pressed (PC13 drops LOW when pressed)
@@ -248,7 +250,40 @@ void wait_for_user_ready(const char* activity_name, int activity_id) {
     }
 }
 
-// Collects IMU data for a single activity class
+// 2. Helper function to check and manage pause/resume states during active recording
+void check_and_handle_pause(const char* activity_name) {
+    // If the Blue User Button (PC13) is pressed during recording
+    if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
+        UART_printf("\r\n========================================\r\n");
+        UART_printf("--- RECORDING PAUSED ---\r\n");
+        UART_printf("Reposition on stairs, then PRESS BLUE BUTTON to RESUME...\r\n");
+        UART_printf("========================================\r\n");
+
+        // Wait until button is released from the initial pause press
+        while (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
+            HAL_Delay(50);
+        }
+
+        // Wait until user presses button again to resume
+        while (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_SET) {
+            HAL_Delay(50);
+        }
+
+        // Wait until button is released after resume press
+        while (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
+            HAL_Delay(50);
+        }
+
+        // 3-second countdown before logging resumes
+        for (int i = 3; i > 0; --i) {
+            UART_printf("Resuming %s in %d...\r\n", activity_name, i);
+            HAL_Delay(1000);
+        }
+        UART_printf("--- RESUMED RECORDING ---\r\n\r\n");
+    }
+}
+
+// 3. Collects IMU data for continuous activities (e.g., Treadmill / Flat Ground)
 void collect_activity(int activity_id, const char* activity_name, uint32_t duration_ms) {
     // Wait for physical button press before starting
     wait_for_user_ready(activity_name, activity_id);
@@ -283,22 +318,69 @@ void collect_activity(int activity_id, const char* activity_name, uint32_t durat
     UART_printf("--- COMPLETED %s ---\r\n", activity_name);
     UART_printf("========================================\r\n");
     UART_printf("========================================\r\n");
-
 }
 
+// 4. Collects IMU data for activities that require mid-session pauses (e.g., Stairs)
+void collect_activity_pausable(int activity_id, const char* activity_name, uint32_t duration_ms) {
+    // Wait for physical button press before starting initial batch
+    wait_for_user_ready(activity_name, activity_id);
+
+    UART_printf("========================================\r\n");
+    UART_printf("--- RECORDING %s (PAUSABLE) ---\r\n", activity_name);
+    UART_printf("Note: Press BLUE BUTTON anytime to PAUSE while repositioning!\r\n");
+    UART_printf("========================================\r\n");
+
+    uint32_t active_recording_time_ms = 0;
+    bmi270_sensor_data_t raw_data;
+
+    // Accumulates ONLY active recording time (pauses do not consume duration)
+    while (active_recording_time_ms < duration_ms) {
+        
+        // Check if user hit the button to pause execution
+        check_and_handle_pause(activity_name);
+
+        // Record data point
+        if (bmi270_sensor.readSensorData(&raw_data) == 0) {
+            int ax_i = (int)raw_data.acc_x, ax_f = (int)(fabsf(raw_data.acc_x - ax_i) * 10000);
+            int ay_i = (int)raw_data.acc_y, ay_f = (int)(fabsf(raw_data.acc_y - ay_i) * 10000);
+            int az_i = (int)raw_data.acc_z, az_f = (int)(fabsf(raw_data.acc_z - az_i) * 10000);
+            int gx_i = (int)raw_data.gyr_x, gx_f = (int)(fabsf(raw_data.gyr_x - gx_i) * 10000);
+            int gy_i = (int)raw_data.gyr_y, gy_f = (int)(fabsf(raw_data.gyr_y - gy_i) * 10000);
+            int gz_i = (int)raw_data.gyr_z, gz_f = (int)(fabsf(raw_data.gyr_z - gz_i) * 10000);
+
+            UART_printf("%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d.%04d,%d\r\n", 
+                        ax_i, ax_f, ay_i, ay_f, az_i, az_f,
+                        gx_i, gx_f, gy_i, gy_f, gz_i, gz_f,
+                        activity_id);
+        }
+
+        HAL_Delay(10); // ~100 Hz sampling rate
+        active_recording_time_ms += 10; // Increment active elapsed time
+    }
+
+    UART_printf("========================================\r\n");
+    UART_printf("--- COMPLETED %s ---\r\n", activity_name);
+    UART_printf("========================================\r\n");
+}
+
+// 5. Main wrapper to execute data collection across all 6 activity classes
 void collect_all() {
-    uint32_t duration_3_min = 3 * 60 * 1000; // 180,000 ms per class
+    uint32_t duration_3_min = 3 * 60 * 1000; // 180,000 ms active duration per class
 
     UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
 
-    // Each call will halt until you press the blue button on the Nucleo
+    // Continuous activities (Treadmill / Flat ground)
     collect_activity(1, "Standing (0 mph)", duration_3_min);
     collect_activity(2, "Walking (2 mph)", duration_3_min);
     collect_activity(3, "Fast Walking (4 mph)", duration_3_min);
     collect_activity(4, "Running (7 mph)", duration_3_min);
 
+    // Pausable activities (Stairs)
+    collect_activity_pausable(5, "Walking Upstairs", duration_3_min);
+    collect_activity_pausable(6, "Walking Downstairs", duration_3_min);
+
     UART_printf("\r\n========================================\r\n");
-    UART_printf("ALL DATA COLLECTION COMPLETE!\r\n");
+    UART_printf("ALL 6 CLASSES DATA COLLECTION COMPLETE!\r\n");
     UART_printf("========================================\r\n");
 }
 
@@ -310,14 +392,14 @@ int main(void) {
 
         // MAIN DEAD LOOP: Uncomment the desired function to run either real-timeinference or data collection
         while (1) {
-        inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
+        //inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
         
         // copy this into terminal to start data collection:     ~/.platformio/penv/bin/pio device monitor > full_dataset.csv
         // Print CSV Header on startup for new data logging session
         //UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
-        //collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
-            //while(1) {
-                //HAL_Delay(1000);// Stay here after data collection is complete
+        collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+            while(1) {
+                HAL_Delay(1000);// Stay here after data collection is complete
         
             
         }
