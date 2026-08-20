@@ -1,7 +1,7 @@
 // include header files for STM32 HAL, BMI270 sensor, and TensorFlow Lite Micro
 #include "stm32l4xx_hal.h"
 #include "board_setup.h"
-#include "bmi270.h"
+#include "BMI270.h"
 #include "activity_model_RJ_0818.h"     //edit for updated models
 #include "math.h"
 
@@ -32,7 +32,7 @@ TfLiteTensor* input_tensor = nullptr;
 TfLiteTensor* output_tensor = nullptr;
 
 // memory allocation  arena for network tensor processing layers
-const int kTensorArenaSize = 90 * 1024;               // 90 KB
+const int kTensorArenaSize = 20 * 1024;               // 20 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // aligned to 16 bytes for hardware vector speedup
 
 // error handler function for I2C initialization failures
@@ -70,7 +70,6 @@ void init_I2C_BMI270() {
     UART_printf("I2C1 Peripheral and Pins Initialized.\r\n");
 }
 
-
 // Configures low-level clocks and physical pin hardware.
 void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -87,7 +86,6 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c) {
     }
 }
 
-
 // Function to read IMU data from BMI270
 void read_imu_data(float* input_data) {
     bmi270_sensor_data_t sensor_data;
@@ -102,7 +100,6 @@ void read_imu_data(float* input_data) {
         UART_printf("Failed to read IMU data!\r\n");
     }
 }
-
 
 // Configures board, tflite, and sensor
 void setup() {
@@ -216,7 +213,10 @@ void inference_loop() {
             raw_imu_data[3], raw_imu_data[4], raw_imu_data[5]);
 }
 
+
+
 #include <cmath>
+// Functions for data collection and user interaction:
 
 // 1. Pauses execution until you press the Blue User Button on the Nucleo board to start
 void wait_for_user_ready(const char* activity_name, int activity_id) {
@@ -233,7 +233,7 @@ void wait_for_user_ready(const char* activity_name, int activity_id) {
     UART_printf("Adjust treadmill / get in position, then PRESS BLUE USER BUTTON...\r\n");
     UART_printf("========================================\r\n");
 
-    // Wait until button is pressed (PC13 drops LOW when pressed)
+    // Wait until button is pressed (PIN 13 drops LOW when pressed)
     while (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_SET) {
         HAL_Delay(50);
     }
@@ -250,9 +250,9 @@ void wait_for_user_ready(const char* activity_name, int activity_id) {
     }
 }
 
-// 2. Helper function to check and manage pause/resume states during active recording
+// 2. Function to check and manage pause/resume states during recording
 void check_and_handle_pause(const char* activity_name) {
-    // If the Blue User Button (PC13) is pressed during recording
+    // If the Blue User Button (PIN 13) is pressed during recording
     if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
         UART_printf("\r\n========================================\r\n");
         UART_printf("--- RECORDING PAUSED ---\r\n");
@@ -320,7 +320,7 @@ void collect_activity(int activity_id, const char* activity_name, uint32_t durat
     UART_printf("========================================\r\n");
 }
 
-// 4. Collects IMU data for activities that require mid-session pauses (e.g., Stairs)
+// 4. Collects IMU data for stairs which require mid-session pauses
 void collect_activity_pausable(int activity_id, const char* activity_name, uint32_t duration_ms) {
     // Wait for physical button press before starting initial batch
     wait_for_user_ready(activity_name, activity_id);
@@ -333,7 +333,7 @@ void collect_activity_pausable(int activity_id, const char* activity_name, uint3
     uint32_t active_recording_time_ms = 0;
     bmi270_sensor_data_t raw_data;
 
-    // Accumulates ONLY active recording time (pauses do not consume duration)
+    // Accumulates ONLY active recording time so that pauses do not consume duration
     while (active_recording_time_ms < duration_ms) {
         
         // Check if user hit the button to pause execution
@@ -363,7 +363,7 @@ void collect_activity_pausable(int activity_id, const char* activity_name, uint3
     UART_printf("========================================\r\n");
 }
 
-// 5. Main wrapper to execute data collection across all 6 activity classes
+// 5. Main data collectionfunction to for all 6 activity classes
 void collect_all() {
     uint32_t duration_3_min = 3 * 60 * 1000; // 180,000 ms active duration per class
 
@@ -384,6 +384,10 @@ void collect_all() {
     UART_printf("========================================\r\n");
 }
 
+
+
+
+
 int main(void) {
     // Resets all peripherals, initializes the flash interface and the systick.
     HAL_Init();
@@ -392,15 +396,20 @@ int main(void) {
 
         // MAIN DEAD LOOP: Uncomment the desired function to run either real-timeinference or data collection
         while (1) {
-        //inference_loop();   //UNCOMMENT WHEN READY TO PERFORM INFERENCE
+        //UNCOMMENT WHEN READY TO PERFORM INFERENCE
+        //inference_loop();   
         
-        // copy this into terminal to start data collection:     ~/.platformio/penv/bin/pio device monitor > full_dataset.csv
+        // copy this into terminal to start data collection:     
+            //  ~/.platformio/penv/bin/pio device monitor > full_dataset.csv
+        
         // Print CSV Header on startup for new data logging session
         //UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
-        collect_all();            //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+        //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
+        collect_all();            
             while(1) {
                 HAL_Delay(1000);// Stay here after data collection is complete
         
             
-        }
-}
+            }
+        }  
+    }
