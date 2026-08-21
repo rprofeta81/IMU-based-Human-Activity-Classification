@@ -32,7 +32,7 @@ TfLiteTensor* input_tensor = nullptr;
 TfLiteTensor* output_tensor = nullptr;
 
 // memory allocation  arena for network tensor processing layers
-const int kTensorArenaSize = 90 * 1024;               // 90 KB
+const int kTensorArenaSize = 20 * 1024;               // 20 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // aligned to 16 bytes for hardware vector speedup
 
 // error handler function for I2C initialization failures
@@ -103,25 +103,25 @@ void read_imu_data(float* input_data) {
 
 // Configures board, tflite, and sensor
 void setup() {
-    // target specific initialization for TensorFlow Lite Micro
+    // 1. Hardware & Peripheral Initialization
     tflite::InitializeTarget();
-    // initialize required pins (GPIO, UART, Timers)
     init_GPIO_pins();
     init_UART2();
     init_TIM2(); 
-    HAL_Delay(100);     // Short delay to ensure UART is ready
+    HAL_Delay(100);     
+
     UART_printf("Initializing I2C for BMI270...\r\n");
     init_I2C_BMI270();
 
     UART_printf("Initializing BMI270 sensor...\r\n");
-    // initialize the BMI270 sensor
     if (bmi270_sensor.init() != 0) {
-        UART_printf("Failed to initialize BMI270 sensor! Check connections and sensor power.\r\n");
-        while(1){}      //dead hang
+        UART_printf("Failed to initialize BMI270 sensor!\r\n");
+        while(1){}      
     } else {
         UART_printf("BMI270 sensor initialized successfully!\r\n");
     }
 
+    // 2. Load Model & Schema Check
     UART_printf("Initializing TFLite Micro...\r\n");
     model = tflite::GetModel(activity_model_int8);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
@@ -129,33 +129,43 @@ void setup() {
                     TFLITE_SCHEMA_VERSION, (int)model->version());
         while(1){}
     }
-    UART_printf("TFLite Micro initialized successfully!\r\n");
 
-    // Expand your resolver to hold all required INT8 operations
-    static tflite::MicroMutableOpResolver<10> op_resolver;
-
-    op_resolver.AddConv2D();           // Note: TFLite Micro often implements Conv1D using Conv2D under the hood!
-    op_resolver.AddMaxPool2D();        // Conv1D/Pooling layers frequently resolve to 2D variants
+    // 3. Register Operators
+    static tflite::MicroMutableOpResolver<20> op_resolver;
+    op_resolver.AddConv2D();
+    op_resolver.AddMaxPool2D();
+    op_resolver.AddMean();
     op_resolver.AddFullyConnected();
     op_resolver.AddSoftmax();
+    op_resolver.AddLogistic();         
     op_resolver.AddQuantize();
     op_resolver.AddDequantize();
     op_resolver.AddReshape();
-    op_resolver.AddMean();             // Needed if you used GlobalAveragePooling1D
+    op_resolver.AddExpandDims();      
+    op_resolver.AddSqueeze();         
+    op_resolver.AddTranspose();       
+    op_resolver.AddPad();
+    op_resolver.AddMul();
+    op_resolver.AddSub();
+    op_resolver.AddAdd();
 
+    // 4. Instantiate Interpreter
     static tflite::MicroInterpreter static_interpreter(
         model, op_resolver, g_tensor_arena, kTensorArenaSize
     );
     interpreter = &static_interpreter;
+
+    // 5. Allocate Tensors
     TfLiteStatus allocate_status = interpreter->AllocateTensors();
     if (allocate_status != kTfLiteOk) {
-        UART_printf("AllocateTensors() failed!\r\n");
-        while(1){}
+        UART_printf("AllocateTensors() failed with status code: %d\r\n", (int)allocate_status);
+        while (1);
     }
-    // gets pointers to the model's input and output tensors, 
-    //which will be used to feed data in and read predictions out
+
+    // 6. Bind Input/Output Tensors
     input_tensor = interpreter->input(0);
     output_tensor = interpreter->output(0);
+
     UART_printf("TFLite Micro initialized successfully!\r\n");
 }
 
@@ -165,7 +175,7 @@ void setup() {
 #define CONFIDENCE_THRESHOLD 0.70f  // 70% confidence threshold for predictions
 
 static float window_buffer[WINDOW_SIZE][NUM_FEATURES];
-
+// main inference loop: collects data, normalizes, quantizes, runs inference, and outputs results
 void inference_loop() {
     const float scaler_mean[NUM_FEATURES]  = { 
         8.65645058f, -1.93121760f, -2.78044642f, -0.09216424f, 0.09234816f, -0.02100617f
@@ -175,7 +185,7 @@ void inference_loop() {
     };
 
     // 1. BLOCK & READ 80 NEW FRAMES (takes exactly 2 seconds at 40 Hz)
-    UART_printf("Collecting 80 samples...\r\n");
+    UART_printf("Predicting activity...\r\n");
     for (int t = 0; t < WINDOW_SIZE; ++t) {
         float raw_imu_data[NUM_FEATURES];
         read_imu_data(raw_imu_data);
@@ -188,39 +198,61 @@ void inference_loop() {
         HAL_Delay(25); // 40Hz sampling interval
     }
 
-    // 2. Flatten 80x6 window into TFLite input tensor
+    // 2. Quantize normalized floats into TFLite INT8 input tensor
+    float in_scale = input_tensor->params.scale;
+    int32_t in_zero_point = input_tensor->params.zero_point;
+    int8_t* input_data = input_tensor->data.int8;
+
     int tensor_idx = 0;
     for (int t = 0; t < WINDOW_SIZE; ++t) {
         for (int f = 0; f < NUM_FEATURES; ++f) {
-            input_tensor->data.f[tensor_idx++] = window_buffer[t][f];
+            float normalized_val = window_buffer[t][f];
+            
+            // Quantize Float -> INT8: (val / scale) + zero_point
+            int32_t quantized_val = (int32_t)(normalized_val / in_scale) + in_zero_point;
+            
+            // Clamp value to int8 range [-128, 127]
+            if (quantized_val < -128) quantized_val = -128;
+            if (quantized_val > 127)  quantized_val = 127;
+
+            input_data[tensor_idx++] = (int8_t)quantized_val;
         }
     }
 
     // 3. Run Inference ONCE on the full batch
     if (interpreter->Invoke() != kTfLiteOk) {
-        UART_printf("Invoke failed!\r\n");
+        UART_printf("Invoke failed!\r\n\r\n");
         return;
     }
 
-    // 4. Argmax and Threshold Check
-    float* output_scores = output_tensor->data.f;
+    // 4. De-quantize INT8 output scores back into probabilities
+    int8_t* output_quantized = output_tensor->data.int8;
+    float out_scale = output_tensor->params.scale;
+    int32_t out_zero_point = output_tensor->params.zero_point;
+
     float max_score = -1.0f;
     int predicted_activity_index = -1;
 
     for (int i = 0; i < NUM_CLASSES; ++i) {
-        if (output_scores[i] > max_score) {
-            max_score = output_scores[i];
+        // Convert INT8 output to float score
+        float score = (output_quantized[i] - out_zero_point) * out_scale;
+
+        if (score > max_score) {
+            max_score = score;
             predicted_activity_index = i;
         }
     }
 
+    // 5. Output display with clean percentages and double spacing (\r\n\r\n)
     if (max_score >= CONFIDENCE_THRESHOLD && predicted_activity_index != -1) {
-        UART_printf("Activity: %s (Confidence: %d.%02d%%)\r\n",
+        int confidence_pct = (int)(max_score * 100.0f);
+        if (confidence_pct > 100) confidence_pct = 100; // Cap at 100%
+
+        UART_printf("Activity: %s (Confidence: %d%%)\r\n\r\n",
                     activity_labels_cpp[predicted_activity_index],
-                    (int)(max_score * 100),
-                    (int)((max_score * 100 - (int)(max_score * 100)) * 100));
+                    confidence_pct);
     } else {
-        UART_printf("Prediction uncertain (Max Score < Threshold)\r\n");
+        UART_printf("Prediction uncertain (Max Score < Threshold)\r\n\r\n");
     }
 }
 
@@ -408,7 +440,7 @@ int main(void) {
         // MAIN DEAD LOOP: Uncomment the desired function to run either real-timeinference or data collection
         while (1) {
         //UNCOMMENT WHEN READY TO PERFORM INFERENCE
-        //inference_loop();   
+        inference_loop();   
         
         // copy this into terminal to start data collection:     
             //  ~/.platformio/penv/bin/pio device monitor > full_dataset.csv
@@ -416,11 +448,11 @@ int main(void) {
         // Print CSV Header on startup for new data logging session
         //UART_printf("ax,ay,az,gx,gy,gz,activity\r\n");
         //UNCOMMENT WHEN READY TO COLLECT RAW IMU DATA
-        collect_all();            
-            while(1) {
-                HAL_Delay(1000);// Stay here after data collection is complete
+        //collect_all();            
+            //while(1) {
+                //HAL_Delay(1000);// Stay here after data collection is complete
         
             
             }
         }  
-    }
+    
