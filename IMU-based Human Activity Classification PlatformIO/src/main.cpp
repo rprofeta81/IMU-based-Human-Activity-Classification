@@ -2,7 +2,7 @@
 #include "stm32l4xx_hal.h"
 #include "board_setup.h"
 #include "BMI270.h"
-#include "activity_model_RJ_0818.h"     //edit for updated models
+#include "activity_model_int8.h"     //edit for updated models
 #include "math.h"
 
 // TFLite Micro Headers
@@ -32,7 +32,7 @@ TfLiteTensor* input_tensor = nullptr;
 TfLiteTensor* output_tensor = nullptr;
 
 // memory allocation  arena for network tensor processing layers
-const int kTensorArenaSize = 20 * 1024;               // 20 KB
+const int kTensorArenaSize = 90 * 1024;               // 90 KB
 alignas(16) uint8_t g_tensor_arena[kTensorArenaSize]; // aligned to 16 bytes for hardware vector speedup
 
 // error handler function for I2C initialization failures
@@ -123,7 +123,7 @@ void setup() {
     }
 
     UART_printf("Initializing TFLite Micro...\r\n");
-    model = tflite::GetModel(activity_model);
+    model = tflite::GetModel(activity_model_int8);
     if (model->version() != TFLITE_SCHEMA_VERSION) {
         UART_printf("Model schema version mismatch! Expected %d, got %d.\r\n",
                     TFLITE_SCHEMA_VERSION, (int)model->version());
@@ -131,16 +131,18 @@ void setup() {
     }
     UART_printf("TFLite Micro initialized successfully!\r\n");
 
-    // From TFLite include the required operators
+    // Expand your resolver to hold all required INT8 operations
+    static tflite::MicroMutableOpResolver<10> op_resolver;
+
+    op_resolver.AddConv2D();           // Note: TFLite Micro often implements Conv1D using Conv2D under the hood!
+    op_resolver.AddMaxPool2D();        // Conv1D/Pooling layers frequently resolve to 2D variants
     op_resolver.AddFullyConnected();
     op_resolver.AddSoftmax();
-    op_resolver.AddReshape();
     op_resolver.AddQuantize();
     op_resolver.AddDequantize();
-    op_resolver.AddExpandDims(); 
-    op_resolver.AddMul();
-    op_resolver.AddAdd();
-    op_resolver.AddSub();
+    op_resolver.AddReshape();
+    op_resolver.AddMean();             // Needed if you used GlobalAveragePooling1D
+
     static tflite::MicroInterpreter static_interpreter(
         model, op_resolver, g_tensor_arena, kTensorArenaSize
     );
@@ -157,60 +159,69 @@ void setup() {
     UART_printf("TFLite Micro initialized successfully!\r\n");
 }
 
-//main loop that: reads IMU data, performs inference, and outputs results
+#define WINDOW_SIZE 80              // 2 seconds of data at 40 Hz
+#define NUM_FEATURES 6              // ax, ay, az, gx, gy, gz
+#define NUM_CLASSES 4               // standing, walking, walking fast, jogging
+#define CONFIDENCE_THRESHOLD 0.70f  // 70% confidence threshold for predictions
+
+static float window_buffer[WINDOW_SIZE][NUM_FEATURES];
+
 void inference_loop() {
-    // STM32 hardware SysTick Delay for 2.5s
-    HAL_Delay(2500);   
-    UART_printf("\r\nReading IMU data...\r\n");
-    
-    // Normalization parameters for the input data (mean and scale) calculated from Colab
-    const float scaler_mean[6]  = { 
-        8.65645058f, -1.93121760f, -2.78044642f, -0.09216424f,  0.09234816f, -0.02100617f
+    const float scaler_mean[NUM_FEATURES]  = { 
+        8.65645058f, -1.93121760f, -2.78044642f, -0.09216424f, 0.09234816f, -0.02100617f
     };
-    const float scaler_scale[6] = { 
+    const float scaler_scale[NUM_FEATURES] = { 
         4.78339646f,  2.89832250f,  3.13069982f, 36.32479483f, 57.31395915f, 36.30224995f
     };
 
-    // reads the latest IMU data and populates the input tensor
-    float raw_imu_data[6];
-    read_imu_data(raw_imu_data);
-    for (int i = 0; i < 6; ++i) {
-        // Apply Z-score standardization: (x - mean) / scale
-        input_tensor->data.f[i] = (raw_imu_data[i] - scaler_mean[i]) / scaler_scale[i]; // normalized
+    // 1. BLOCK & READ 80 NEW FRAMES (takes exactly 2 seconds at 40 Hz)
+    UART_printf("Collecting 80 samples...\r\n");
+    for (int t = 0; t < WINDOW_SIZE; ++t) {
+        float raw_imu_data[NUM_FEATURES];
+        read_imu_data(raw_imu_data);
+
+        // Normalize and store directly into time index t
+        for (int f = 0; f < NUM_FEATURES; ++f) {
+            window_buffer[t][f] = (raw_imu_data[f] - scaler_mean[f]) / scaler_scale[f];
+        }
+
+        HAL_Delay(25); // 40Hz sampling interval
     }
 
-    // invokes the TFLite Micro interpreter to run inference on the input data
-    TfLiteStatus invoke_status = interpreter->Invoke();
-    if (invoke_status != kTfLiteOk) {
-        UART_printf("Invoke failed!");
+    // 2. Flatten 80x6 window into TFLite input tensor
+    int tensor_idx = 0;
+    for (int t = 0; t < WINDOW_SIZE; ++t) {
+        for (int f = 0; f < NUM_FEATURES; ++f) {
+            input_tensor->data.f[tensor_idx++] = window_buffer[t][f];
+        }
+    }
+
+    // 3. Run Inference ONCE on the full batch
+    if (interpreter->Invoke() != kTfLiteOk) {
+        UART_printf("Invoke failed!\r\n");
         return;
     }
-    
-    // 1. Point to the array of probabilities returned by Softmax
+
+    // 4. Argmax and Threshold Check
     float* output_scores = output_tensor->data.f;
-    // 2. Argmax Loop: Find the highest probability in the array
     float max_score = -1.0f;
     int predicted_activity_index = -1;
-    for (int i = 0; i < 4; ++i) {
+
+    for (int i = 0; i < NUM_CLASSES; ++i) {
         if (output_scores[i] > max_score) {
             max_score = output_scores[i];
             predicted_activity_index = i;
         }
     }
-    
-    // 3. Prints the highest class label and split the float to show 4 decimal places
-    if (predicted_activity_index != -1) {
-        UART_printf("Predicted Activity: %s (Score: %d.%04d)\r\n",
-                    activity_labels_cpp[predicted_activity_index],
-                    (int)max_score,
-                    (int)((max_score - (int)max_score) * 10000));
-    } else {
-        UART_printf("Could not determine activity.\r\n");
-    }
 
-    UART_printf("Raw IMU: ax=%.2f, ay=%.2f, az=%.2f | gx=%.2f, gy=%.2f, gz=%.2f\r\n",
-            raw_imu_data[0], raw_imu_data[1], raw_imu_data[2],
-            raw_imu_data[3], raw_imu_data[4], raw_imu_data[5]);
+    if (max_score >= CONFIDENCE_THRESHOLD && predicted_activity_index != -1) {
+        UART_printf("Activity: %s (Confidence: %d.%02d%%)\r\n",
+                    activity_labels_cpp[predicted_activity_index],
+                    (int)(max_score * 100),
+                    (int)((max_score * 100 - (int)(max_score * 100)) * 100));
+    } else {
+        UART_printf("Prediction uncertain (Max Score < Threshold)\r\n");
+    }
 }
 
 
